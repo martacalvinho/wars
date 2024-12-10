@@ -1,163 +1,167 @@
-import { useState, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import styled from 'styled-components';
-import { AnimatePresence } from 'framer-motion';
+import { useParams } from 'react-router-dom';
 import { useUser } from '../context/UserContext';
+import BattleContainer from '../components/battle/BattleContainer';
 import CommentSection from '../components/comments/CommentSection';
-import MemeSort from '../components/memes/MemeSort';
-import SplitScreen from '../components/battle/SplitScreen';
-import Side from '../components/battle/Side';
-import Content from '../components/battle/Content';
-import MemeGrid from '../components/battle/MemeGrid';
-import MemeCard from '../components/battle/MemeCard';
-import MemeModal from '../components/battle/MemeModal';
-import BattleHeader from '../components/battle/BattleHeader';
-import VoteMeter from '../components/battle/VoteMeter';
+import { getActiveBattle, getVoteStatus, castVote, getComments, addComment, subscribeToVotes, subscribeToComments } from '../lib/supabase';
 
-const BattlePageContainer = styled.div`
-  display: flex;
-  flex-direction: column;
-  min-height: 100vh;
-  padding-top: 60px;
+const Container = styled.div`
+  max-width: 1200px;
+  margin: 80px auto 0;
+  padding: 0 2rem;
 `;
 
-const MainContent = styled.div`
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-`;
-
-const CommentsPanel = styled.div`
-  background: rgba(26, 27, 58, 0.95);
+const MessageContainer = styled.div`
+  text-align: center;
+  margin-top: 4rem;
   padding: 2rem;
-  border-top: 1px solid ${props => props.theme.colors.primary}40;
-  backdrop-filter: blur(10px);
+  background: ${props => props.theme.colors.background};
+  border-radius: 12px;
+  border: 1px solid ${props => props.theme.colors.border};
 `;
 
-const BattlePage = () => {
-  const [votes, setVotes] = useState({ left: 420, right: 369 });
-  const [selectedMeme, setSelectedMeme] = useState(null);
-  const [sortBy, setSortBy] = useState('recent');
-  const [memes, setMemes] = useState(
-    Array.from({ length: 20 }, (_, i) => ({ 
-      id: i + 1, 
-      image: `https://picsum.photos/800/800?random=${i}`, 
-      likes: Math.floor(Math.random() * 100),
-      timestamp: new Date(Date.now() - Math.random() * 10000000000).toISOString(),
-      side: i % 2 === 0 ? 'left' : 'right'
-    }))
-  );
-  const [likedMemes, setLikedMemes] = useState(new Set());
-  const { user, updateUser } = useUser();
+const MessageTitle = styled.h2`
+  color: ${props => props.theme.colors.primary};
+  margin-bottom: 1rem;
+`;
 
-  const sortedMemes = useMemo(() => {
-    return [...memes].sort((a, b) => {
-      if (sortBy === 'recent') {
-        return new Date(b.timestamp) - new Date(a.timestamp);
-      }
-      return b.likes - a.likes;
-    });
-  }, [memes, sortBy]);
+const MessageText = styled.p`
+  color: ${props => props.theme.colors.text};
+  margin-bottom: 1rem;
+`;
 
-  const handleVoteBar = (side) => {
-    setVotes(prev => ({
-      ...prev,
-      [side]: prev[side] + 1
-    }));
+export default function BattlePage() {
+  const [battle, setBattle] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [userVote, setUserVote] = useState(null);
+  const [comments, setComments] = useState([]);
+  const { user } = useUser();
+  const { id } = useParams();
 
-    updateUser({
-      stats: {
-        ...user.stats,
-        votes: (user.stats.votes || 0) + 1
-      }
-    });
-  };
+  // Fetch battle data
+  useEffect(() => {
+    async function fetchBattle() {
+      try {
+        setLoading(true);
+        const battleData = await getActiveBattle();
+        setBattle(battleData);
 
-  const handleMemeLike = (meme) => {
-    const newMemes = [...memes];
-    const memeIndex = newMemes.findIndex(m => m.id === meme.id);
-    
-    if (memeIndex !== -1) {
-      const isLiked = likedMemes.has(meme.id);
-      newMemes[memeIndex] = {
-        ...newMemes[memeIndex],
-        likes: newMemes[memeIndex].likes + (isLiked ? -1 : 1)
-      };
-      
-      setMemes(newMemes);
-      setLikedMemes(prev => {
-        const newSet = new Set(prev);
-        if (isLiked) {
-          newSet.delete(meme.id);
-        } else {
-          newSet.add(meme.id);
+        if (battleData && user) {
+          const voteData = await getVoteStatus(battleData.id, user.id);
+          setUserVote(voteData?.team || null);
         }
-        return newSet;
-      });
+
+        if (battleData) {
+          const commentsData = await getComments(battleData.id);
+          setComments(commentsData || []);
+        }
+      } catch (err) {
+        console.error('Error fetching battle:', err);
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
     }
 
-    updateUser({
-      stats: {
-        ...user.stats,
-        likes: (user.stats.likes || 0) + 1
-      }
+    fetchBattle();
+  }, [user]);
+
+  // Subscribe to real-time updates
+  useEffect(() => {
+    if (!battle?.id) return;
+
+    const voteSubscription = subscribeToVotes(battle.id, (payload) => {
+      setBattle(prev => ({
+        ...prev,
+        votes: payload.new.votes
+      }));
     });
+
+    const commentSubscription = subscribeToComments(battle.id, (payload) => {
+      setComments(prev => [...prev, payload.new]);
+    });
+
+    return () => {
+      voteSubscription?.unsubscribe();
+      commentSubscription?.unsubscribe();
+    };
+  }, [battle?.id]);
+
+  const handleVote = async (team) => {
+    if (!user) return;
+    try {
+      await castVote({
+        battle_id: battle.id,
+        user_id: user.id,
+        team
+      });
+      setUserVote(team);
+    } catch (err) {
+      console.error('Error casting vote:', err);
+    }
   };
 
-  const renderSide = (side) => (
-    <Side side={side}>
-      <Content>
-        <MemeSort sortBy={sortBy} onSortChange={setSortBy} side={side} />
-        <MemeGrid>
-          {sortedMemes
-            .filter(meme => meme.side === side)
-            .map(meme => (
-              <MemeCard
-                key={meme.id}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={() => setSelectedMeme(meme)}
-                liked={likedMemes.has(meme.id)}
-                onLike={() => handleMemeLike(meme)}
-                likes={meme.likes}
-              >
-                <img src={meme.image} alt="Meme" />
-              </MemeCard>
-            ))}
-        </MemeGrid>
-      </Content>
-    </Side>
-  );
+  const handleComment = async (content, team = null) => {
+    if (!user) return;
+    try {
+      await addComment({
+        battle_id: battle.id,
+        user_id: user.id,
+        content,
+        team
+      });
+    } catch (err) {
+      console.error('Error adding comment:', err);
+    }
+  };
+
+  if (loading) {
+    return (
+      <Container>
+        <MessageContainer>
+          <MessageTitle>Loading Battle...</MessageTitle>
+          <MessageText>Preparing the meme battlefield...</MessageText>
+        </MessageContainer>
+      </Container>
+    );
+  }
+
+  if (error) {
+    return (
+      <Container>
+        <MessageContainer>
+          <MessageTitle>Oops!</MessageTitle>
+          <MessageText>Something went wrong while loading the battle. Please try again later.</MessageText>
+        </MessageContainer>
+      </Container>
+    );
+  }
+
+  if (!battle) {
+    return (
+      <Container>
+        <MessageContainer>
+          <MessageTitle>No Active Battle</MessageTitle>
+          <MessageText>There are no meme battles happening right now. Check back soon!</MessageText>
+        </MessageContainer>
+      </Container>
+    );
+  }
 
   return (
-    <BattlePageContainer>
-      <MainContent>
-        <BattleHeader />
-        <SplitScreen>
-          {renderSide('left')}
-          <VoteMeter
-            votes={votes}
-            onVote={handleVoteBar}
-          />
-          {renderSide('right')}
-        </SplitScreen>
-      </MainContent>
-
-      <CommentsPanel>
-        <CommentSection battleId="active" />
-      </CommentsPanel>
-
-      <AnimatePresence>
-        {selectedMeme && (
-          <MemeModal
-            meme={selectedMeme}
-            onClose={() => setSelectedMeme(null)}
-            onLike={() => handleMemeLike(selectedMeme)}
-            liked={likedMemes.has(selectedMeme.id)}
-          />
-        )}
-      </AnimatePresence>
-    </BattlePageContainer>
+    <Container>
+      <BattleContainer
+        battle={battle}
+        userVote={userVote}
+        onVote={handleVote}
+      />
+      <CommentSection
+        comments={comments}
+        onComment={handleComment}
+        userVoted={!!userVote}
+      />
+    </Container>
   );
-};
-
-export default BattlePage;
+}

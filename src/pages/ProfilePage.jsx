@@ -20,8 +20,11 @@ const ProfilePage = () => {
   const { user } = useUser();
   const [isEditing, setIsEditing] = useState(false);
 
-  const profile = user.username === username ? user : {
-    username: username || 'Anonymous',
+  // If no username in URL and user is logged in, use current user's profile
+  const currentUsername = username || user?.username;
+  
+  const profile = (currentUsername === user?.username) ? user : {
+    username: currentUsername || 'Anonymous',
     team: 'none',
     joinedAt: new Date().toISOString(),
     stats: {
@@ -32,7 +35,7 @@ const ProfilePage = () => {
     }
   };
 
-  const isOwnProfile = user.username === profile.username;
+  const isOwnProfile = user?.username === profile.username || (!username && user);
 
   return (
     <Container>
@@ -43,11 +46,13 @@ const ProfilePage = () => {
       />
       <StatsSection stats={profile.stats} />
       <ActivitySection activity={[]} />
-      <EditProfileModal
-        isOpen={isEditing}
-        onClose={() => setIsEditing(false)}
-        profile={profile}
-      />
+      {isOwnProfile && (
+        <EditProfileModal
+          isOpen={isEditing}
+          onClose={() => setIsEditing(false)}
+          profile={profile}
+        />
+      )}
     </Container>
   );
 };

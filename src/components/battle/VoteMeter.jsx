@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 
 const Container = styled(motion.div)`
   position: ${props => props.$minimized ? 'fixed' : 'absolute'};
-  top: ${props => props.$minimized ? '60px' : '50%'};
+  top: ${props => props.$minimized ? '80px' : '50%'};
   left: ${props => props.$minimized ? '0' : '50%'};
   right: ${props => props.$minimized ? '0' : 'auto'};
   transform: ${props => props.$minimized ? 'none' : 'translate(-50%, -50%)'};
@@ -15,6 +15,10 @@ const Container = styled(motion.div)`
   backdrop-filter: blur(10px);
   box-shadow: 0 0 30px rgba(0, 0, 0, 0.5);
   min-width: ${props => props.$minimized ? '100%' : '300px'};
+
+  & + * {
+    margin-top: ${props => props.$minimized ? '60px' : '0'};
+  }
 `;
 
 const Content = styled.div`
@@ -56,17 +60,21 @@ const ProgressContainer = styled.div`
   height: 30px;
   display: ${props => props.$minimized ? 'flex' : 'none'};
   align-items: center;
-  justify-content: center;
-  gap: 4px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 15px;
+  overflow: hidden;
 `;
 
 const ProgressBar = styled(motion.div)`
-  width: 20px;
   height: 100%;
   background: ${props => props.side === 'left' ? props.theme.colors.primary : props.theme.colors.secondary};
-  border-radius: 10px;
-  position: relative;
+  width: ${props => props.percentage}%;
+  position: absolute;
+  left: ${props => props.side === 'left' ? 0 : 'auto'};
+  right: ${props => props.side === 'right' ? 0 : 'auto'};
+  max-width: 50%;
   cursor: pointer;
+  transition: width 0.3s ease;
   
   &:hover {
     filter: brightness(1.2);
@@ -77,7 +85,10 @@ const Percentage = styled.div`
   position: absolute;
   font-family: ${props => props.theme.fonts.heading};
   font-size: 0.8rem;
-  color: ${props => props.side === 'left' ? props.theme.colors.primary : props.theme.colors.secondary};
+  color: ${props => props.theme.colors.text};
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
 `;
 
 const VoteButtons = styled.div`
@@ -148,22 +159,15 @@ const VoteMeter = ({ votes, onVote }) => {
           <ProgressContainer $minimized={minimized}>
             <ProgressBar
               side="left"
+              percentage={leftPercentage}
               onClick={() => onVote('left')}
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.95 }}
             />
-            <Percentage side="left" $minimized={minimized}>
-              {Math.round(leftPercentage)}%
-            </Percentage>
-            <Percentage side="right" $minimized={minimized}>
-              {Math.round(rightPercentage)}%
-            </Percentage>
             <ProgressBar
               side="right"
+              percentage={rightPercentage}
               onClick={() => onVote('right')}
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.95 }}
             />
+            <Percentage>{Math.round(leftPercentage)}% vs {Math.round(rightPercentage)}%</Percentage>
           </ProgressContainer>
 
           <VoteCount side="right" $minimized={minimized}>

@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import styled from 'styled-components';
 import { useUser } from '../context/UserContext';
 import { motion } from 'framer-motion';
+import ConnectWallet from './wallet/ConnectWallet';
 
 const Nav = styled.nav`
   background: rgba(26, 27, 58, 0.95);
@@ -22,18 +23,18 @@ const NavContainer = styled.div`
   align-items: center;
 `;
 
+const LeftSection = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+`;
+
 const Logo = styled(Link)`
   font-family: ${props => props.theme.fonts.heading};
   font-size: 1.5rem;
   color: ${props => props.theme.colors.primary};
   text-shadow: ${props => props.theme.shadows.neon};
   text-decoration: none;
-`;
-
-const NavLinks = styled.div`
-  display: flex;
-  gap: 2rem;
-  align-items: center;
 `;
 
 const NavLink = styled(Link)`
@@ -48,7 +49,13 @@ const NavLink = styled(Link)`
   }
 `;
 
-const ProfileButton = styled(motion(Link))`
+const RightSection = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+`;
+
+const ProfileLink = styled(Link)`
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -77,22 +84,18 @@ const Navigation = () => {
   return (
     <Nav>
       <NavContainer>
-        <Logo to="/">MEME WARS</Logo>
-        <NavLinks>
-          <NavLink to="/">Home</NavLink>
-          <NavLink to="/battle/active">Battle</NavLink>
+        <LeftSection>
+          <Logo to="/">MEME WARS</Logo>
+          <NavLink to="/battle">Battle</NavLink>
           <NavLink to="/leaderboard">Leaderboard</NavLink>
-          <ProfileButton
-            to={user.username ? `/profile/${user.username}` : '/profile'}
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-          >
-            <svg viewBox="0 0 24 24">
-              <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
-            </svg>
-            {user.username || 'Profile'}
-          </ProfileButton>
-        </NavLinks>
+        </LeftSection>
+        
+        <RightSection>
+          <ConnectWallet />
+          <ProfileLink to={user?.username ? `/profile/${user.username}` : '/profile'}>
+            {user?.username || 'Profile'}
+          </ProfileLink>
+        </RightSection>
       </NavContainer>
     </Nav>
   );
