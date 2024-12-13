@@ -1,75 +1,99 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import { useWallet } from './WalletContext';
 import { getUser, createUser, logWalletActivity } from '../lib/supabase';
-import { generateRandomUsername } from '../utils/username';
 
 const UserContext = createContext();
 
 export function UserProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const { wallet, connected } = useWallet();
+  const { connected, walletAddress } = useWallet();
 
   useEffect(() => {
+    let mounted = true;
+
     async function handleWalletConnection() {
-      if (connected && wallet?.publicKey) {
-        try {
-          setLoading(true);
-          const walletAddress = wallet.publicKey.toString();
-          
-          // Try to get existing user
-          let userData = await getUser(walletAddress).catch(() => null);
-          
-          // Create new user if doesn't exist
-          if (!userData) {
+      try {
+        if (!connected || !walletAddress) {
+          setUser(null);
+          return;
+        }
+
+        setLoading(true);
+        console.log('Fetching user for wallet:', walletAddress);
+
+        // Try to get existing user
+        let userData = await getUser(walletAddress);
+        console.log('Existing user data:', userData);
+        
+        // If user doesn't exist, create new user
+        if (!userData) {
+          console.log('Creating new user for wallet:', walletAddress);
+          try {
             userData = await createUser({
-              wallet_address: walletAddress,
-              username: generateRandomUsername(),
-              wallet_type: 'phantom',
-              wallet_network: 'mainnet'
+              wallet_address: walletAddress
             });
+            console.log('Created new user:', userData);
+          } catch (createError) {
+            console.error('Error creating user:', createError);
+            return;
           }
+        }
 
-          // Log the connection
+        // Log the wallet activity
+        try {
           await logWalletActivity({
-            p_user_id: userData.id,
-            p_wallet_address: walletAddress,
-            p_activity_type: 'connect'
+            wallet_address: walletAddress,
+            action_type: 'connect'
           });
+        } catch (logError) {
+          console.error('Error logging activity:', logError);
+        }
 
+        if (mounted) {
           setUser(userData);
-        } catch (error) {
-          console.error('Error handling wallet connection:', error);
-        } finally {
+        }
+      } catch (error) {
+        console.error('Error in wallet connection flow:', error);
+      } finally {
+        if (mounted) {
           setLoading(false);
         }
-      } else {
-        setUser(null);
-        setLoading(false);
       }
     }
 
     handleWalletConnection();
-  }, [connected, wallet]);
 
-  // Log disconnect when wallet disconnects
+    return () => {
+      mounted = false;
+    };
+  }, [connected, walletAddress]);
+
+  // Debug log to help track user state
   useEffect(() => {
-    if (!connected && user) {
-      logWalletActivity({
-        p_user_id: user.id,
-        p_wallet_address: user.wallet_address,
-        p_activity_type: 'disconnect'
-      }).catch(console.error);
-    }
-  }, [connected, user]);
+    console.log('User state changed:', { 
+      user, 
+      loading, 
+      connected, 
+      walletAddress,
+      hasUser: !!user,
+      isConnected: !!connected,
+      hasWallet: !!walletAddress
+    });
+  }, [user, loading, connected, walletAddress]);
 
   const value = {
     user,
     loading,
-    setUser
+    isConnected: connected,
+    walletAddress
   };
 
-  return <UserContext.Provider value={value}>{children}</UserContext.Provider>;
+  return (
+    <UserContext.Provider value={value}>
+      {children}
+    </UserContext.Provider>
+  );
 }
 
 export function useUser() {
@@ -79,3 +103,5 @@ export function useUser() {
   }
   return context;
 }
+
+export default UserContext;

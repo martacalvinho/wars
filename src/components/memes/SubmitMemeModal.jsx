@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useUser } from '../../context/UserContext';
+import { submitMeme, supabase } from '../../lib/supabase';
 
 const Overlay = styled(motion.div)`
   position: fixed;
@@ -73,6 +75,28 @@ const Input = styled.input`
     outline: none;
     border-color: ${props => props.theme.colors.primary};
   }
+
+  &::placeholder {
+    color: ${props => props.theme.colors.textSecondary};
+  }
+`;
+
+const InputGroup = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+
+  label {
+    color: ${props => props.theme.colors.textSecondary};
+    font-size: 0.9rem;
+  }
+`;
+
+const ErrorMessage = styled.p`
+  color: ${props => props.theme.colors.error};
+  text-align: center;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
 `;
 
 const UploadArea = styled.div`
@@ -82,11 +106,26 @@ const UploadArea = styled.div`
   text-align: center;
   cursor: pointer;
   transition: all 0.3s ease;
-
-  &:hover {
-    border-color: ${props => props.theme.colors.primary};
+  ${props => props.$hasFile && `
+    border-color: ${props.theme.colors.primary};
     background: rgba(255, 51, 102, 0.1);
-  }
+  `}
+`;
+
+const UploadIcon = styled.span`
+  font-size: 2rem;
+  margin-bottom: 0.5rem;
+`;
+
+const PreviewImage = styled.img`
+  width: 100%;
+  max-height: 200px;
+  object-fit: contain;
+  border-radius: 10px;
+`;
+
+const HiddenInput = styled.input`
+  display: none;
 `;
 
 const SubmitButton = styled(motion.button)`
@@ -122,42 +161,150 @@ const CloseButton = styled(motion.button)`
   }
 `;
 
-const HiddenInput = styled.input`
-  display: none;
-`;
-
-const SubmitMemeModal = ({ isOpen, onClose }) => {
+const SubmitMemeModal = ({ isOpen, onClose, battleId, team }) => {
+  const { user } = useUser();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [file, setFile] = useState(null);
+  const [preview, setPreview] = useState(null);
   const [formData, setFormData] = useState({
-    memeName: '',
-    telegram: '',
-    discord: '',
-    twitter: '',
-    walletAddress: '',
-    logo: null
+    submissionName: '',
+    twitterHandle: '',
+    telegramHandle: ''
   });
 
+  useEffect(() => {
+    if (!isOpen) {
+      setFile(null);
+      setPreview(null);
+      setFormData({
+        submissionName: '',
+        twitterHandle: '',
+        telegramHandle: ''
+      });
+      setError(null);
+    }
+  }, [isOpen]);
+
   const handleInputChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value
-    });
+    const { name, value } = e.target;
+    const cleanedValue = name.includes('Handle') && value.startsWith('@') 
+      ? value.substring(1) 
+      : value;
+    
+    setFormData(prev => ({
+      ...prev,
+      [name]: cleanedValue
+    }));
   };
 
   const handleFileUpload = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      setFormData({
-        ...formData,
-        logo: file
-      });
+    const selectedFile = e.target.files[0];
+    if (selectedFile) {
+      if (selectedFile.size > 5 * 1024 * 1024) {
+        setError('File size must be less than 5MB');
+        setFile(null);
+        setPreview(null);
+        return;
+      }
+      setFile(selectedFile);
+      const previewUrl = URL.createObjectURL(selectedFile);
+      setPreview(previewUrl);
+      setError(null);
     }
   };
 
-  const handleSubmit = (e) => {
+  const validateForm = () => {
+    if (!formData.submissionName.trim()) {
+      setError('Please enter a submission name');
+      return false;
+    }
+    if (!file) {
+      setError('Please upload a meme image');
+      return false;
+    }
+    if (!user) {
+      setError('Please sign in to submit a meme');
+      return false;
+    }
+    if (!battleId || !team) {
+      setError('Invalid battle or team selection');
+      return false;
+    }
+    return true;
+  };
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    // Handle form submission
-    console.log('Form submitted:', formData);
-    onClose();
+    
+    console.log('Submit clicked with:', {
+      file,
+      preview,
+      formData,
+      battleId,
+      team,
+      user
+    });
+
+    if (!validateForm()) {
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      console.log('Starting meme submission...', { battleId, team, user });
+
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${user.id}/${battleId}/${Math.random()}.${fileExt}`;
+      
+      console.log('Uploading file...', fileName);
+      
+      const { error: uploadError, data: uploadData } = await supabase.storage
+        .from('memes')
+        .upload(fileName, file);
+
+      if (uploadError) {
+        console.error('Upload error:', uploadError);
+        throw new Error('Failed to upload image: ' + uploadError.message);
+      }
+
+      console.log('File uploaded successfully:', uploadData);
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('memes')
+        .getPublicUrl(fileName);
+
+      if (!publicUrl) {
+        throw new Error('Failed to get public URL for uploaded image');
+      }
+
+      console.log('Got public URL:', publicUrl);
+
+      const memeData = {
+        battleId,
+        userId: user.id,
+        imageUrl: publicUrl,
+        team,
+        submissionName: formData.submissionName,
+        twitterHandle: formData.twitterHandle,
+        telegramHandle: formData.telegramHandle,
+        walletAddress: user.wallet_address
+      };
+
+      console.log('Submitting meme data:', memeData);
+
+      const result = await submitMeme(memeData);
+      console.log('Meme submitted successfully:', result);
+
+      onClose();
+    } catch (err) {
+      console.error('Error submitting meme:', err);
+      setError(err.message || 'Failed to submit meme. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -175,70 +322,79 @@ const SubmitMemeModal = ({ isOpen, onClose }) => {
             exit={{ scale: 0.9, opacity: 0 }}
             onClick={e => e.stopPropagation()}
           >
-            <CloseButton
-              onClick={onClose}
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-            >
-              ×
-            </CloseButton>
+            <CloseButton onClick={onClose}>×</CloseButton>
             <Title>Submit Your Meme</Title>
+            
             <Form onSubmit={handleSubmit}>
-              <Input
-                type="text"
-                name="memeName"
-                placeholder="Meme Name"
-                value={formData.memeName}
-                onChange={handleInputChange}
-                required
-              />
-              <Input
-                type="text"
-                name="telegram"
-                placeholder="Telegram"
-                value={formData.telegram}
-                onChange={handleInputChange}
-              />
-              <Input
-                type="text"
-                name="discord"
-                placeholder="Discord"
-                value={formData.discord}
-                onChange={handleInputChange}
-              />
-              <Input
-                type="text"
-                name="twitter"
-                placeholder="Twitter"
-                value={formData.twitter}
-                onChange={handleInputChange}
-              />
-              <Input
-                type="text"
-                name="walletAddress"
-                placeholder="Wallet Address"
-                value={formData.walletAddress}
-                onChange={handleInputChange}
-                required
-              />
-              <HiddenInput
-                type="file"
-                id="logo-upload"
-                accept="image/*"
-                onChange={handleFileUpload}
-              />
-              <UploadArea onClick={() => document.getElementById('logo-upload').click()}>
-                <p style={{ fontFamily: props => props.theme.fonts.heading }}>
-                  {formData.logo ? formData.logo.name : 'Click to upload image'}
-                </p>
-              </UploadArea>
+              {error && (
+                <ErrorMessage>{error}</ErrorMessage>
+              )}
+              
+              <InputGroup>
+                <label>Submission Name *</label>
+                <Input
+                  type="text"
+                  name="submissionName"
+                  placeholder="Give your meme a name"
+                  value={formData.submissionName}
+                  onChange={handleInputChange}
+                  required
+                />
+              </InputGroup>
+
+              <InputGroup>
+                <label>Twitter Handle</label>
+                <Input
+                  type="text"
+                  name="twitterHandle"
+                  placeholder="yourtwitterhandle"
+                  value={formData.twitterHandle}
+                  onChange={handleInputChange}
+                />
+              </InputGroup>
+
+              <InputGroup>
+                <label>Telegram Handle</label>
+                <Input
+                  type="text"
+                  name="telegramHandle"
+                  placeholder="yourtelegramhandle"
+                  value={formData.telegramHandle}
+                  onChange={handleInputChange}
+                />
+              </InputGroup>
+
+              <InputGroup>
+                <label>Upload Meme *</label>
+                <HiddenInput
+                  type="file"
+                  id="meme-upload"
+                  accept="image/*"
+                  onChange={handleFileUpload}
+                />
+                <UploadArea
+                  as="label"
+                  htmlFor="meme-upload"
+                  $hasFile={!!preview}
+                >
+                  {preview ? (
+                    <PreviewImage src={preview} alt="Meme preview" />
+                  ) : (
+                    <>
+                      <UploadIcon>📸</UploadIcon>
+                      <p>Click to upload your meme (max 5MB)</p>
+                    </>
+                  )}
+                </UploadArea>
+              </InputGroup>
+
               <SubmitButton
                 type="submit"
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                disabled={!formData.memeName || !formData.walletAddress || !formData.logo}
+                disabled={loading}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
               >
-                Submit
+                {loading ? 'Submitting...' : 'Submit Meme'}
               </SubmitButton>
             </Form>
           </Modal>

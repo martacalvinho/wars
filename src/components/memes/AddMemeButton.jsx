@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import styled from 'styled-components';
 import { motion } from 'framer-motion';
+import SubmitMemeModal from './SubmitMemeModal';
 
 const Button = styled(motion.button)`
   background: ${props => 
@@ -24,22 +25,8 @@ const Button = styled(motion.button)`
   }
 `;
 
-const HiddenInput = styled.input`
-  display: none;
-`;
-
-const AddMemeButton = ({ side }) => {
-  const [inputKey, setInputKey] = useState(0);
-
-  const handleFileChange = (event) => {
-    const file = event.target.files[0];
-    if (file) {
-      // Handle file upload here
-      console.log('File selected:', file);
-    }
-    // Reset input to allow selecting the same file again
-    setInputKey(prev => prev + 1);
-  };
+const AddMemeButton = ({ side, battleId }) => {
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   return (
     <>
@@ -47,19 +34,19 @@ const AddMemeButton = ({ side }) => {
         side={side}
         whileHover={{ scale: 1.05 }}
         whileTap={{ scale: 0.95 }}
-        onClick={() => document.getElementById(`fileInput-${side}`).click()}
+        onClick={() => setIsModalOpen(true)}
       >
         <svg viewBox="0 0 24 24">
-          <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+          <path d="M12 4V20M20 12H4" strokeWidth="2" strokeLinecap="round" />
         </svg>
         Add Meme
       </Button>
-      <HiddenInput
-        key={inputKey}
-        id={`fileInput-${side}`}
-        type="file"
-        accept="image/*"
-        onChange={handleFileChange}
+
+      <SubmitMemeModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        battleId={battleId}
+        team={side}
       />
     </>
   );

@@ -1,5 +1,6 @@
 import styled from 'styled-components';
 import { motion } from 'framer-motion';
+import AddMemeButton from '../memes/AddMemeButton';
 
 const Side = styled(motion.div)`
   flex: 1;
@@ -10,12 +11,13 @@ const Side = styled(motion.div)`
     'linear-gradient(135deg, #FF336620 0%, transparent 100%)' : 
     'linear-gradient(135deg, transparent 0%, #00F5FF20 100%)'
   };
-  padding: 0 1rem;
+  padding: 1rem;
   overflow: hidden;
 `;
 
-const SideWrapper = ({ side, children }) => (
+const SideWrapper = ({ side, battleId, children }) => (
   <Side side={side}>
+    <AddMemeButton side={side} battleId={battleId} />
     {children}
   </Side>
 );

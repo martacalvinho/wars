@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { useParams } from 'react-router-dom';
 import { useUser } from '../context/UserContext';
-import BattleContainer from '../components/battle/BattleContainer';
+import Battle from '../components/battle/Battle';
 import CommentSection from '../components/comments/CommentSection';
 import { getActiveBattle, getVoteStatus, castVote, getComments, addComment, subscribeToVotes, subscribeToComments } from '../lib/supabase';
 
@@ -103,14 +103,13 @@ export default function BattlePage() {
     }
   };
 
-  const handleComment = async (content, team = null) => {
-    if (!user) return;
+  const handleComment = async (content) => {
+    if (!user || !battle) return;
     try {
       await addComment({
         battle_id: battle.id,
         user_id: user.id,
-        content,
-        team
+        content
       });
     } catch (err) {
       console.error('Error adding comment:', err);
@@ -121,8 +120,7 @@ export default function BattlePage() {
     return (
       <Container>
         <MessageContainer>
-          <MessageTitle>Loading Battle...</MessageTitle>
-          <MessageText>Preparing the meme battlefield...</MessageText>
+          <MessageTitle>Loading...</MessageTitle>
         </MessageContainer>
       </Container>
     );
@@ -132,8 +130,8 @@ export default function BattlePage() {
     return (
       <Container>
         <MessageContainer>
-          <MessageTitle>Oops!</MessageTitle>
-          <MessageText>Something went wrong while loading the battle. Please try again later.</MessageText>
+          <MessageTitle>Error</MessageTitle>
+          <MessageText>{error}</MessageText>
         </MessageContainer>
       </Container>
     );
@@ -144,7 +142,7 @@ export default function BattlePage() {
       <Container>
         <MessageContainer>
           <MessageTitle>No Active Battle</MessageTitle>
-          <MessageText>There are no meme battles happening right now. Check back soon!</MessageText>
+          <MessageText>Check back later for the next meme battle!</MessageText>
         </MessageContainer>
       </Container>
     );
@@ -152,15 +150,14 @@ export default function BattlePage() {
 
   return (
     <Container>
-      <BattleContainer
+      <Battle 
         battle={battle}
-        userVote={userVote}
         onVote={handleVote}
+        userVote={userVote}
       />
       <CommentSection
         comments={comments}
         onComment={handleComment}
-        userVoted={!!userVote}
       />
     </Container>
   );

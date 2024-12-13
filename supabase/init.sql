@@ -2,18 +2,27 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
--- Set up storage for meme images
-INSERT INTO storage.buckets (id, name, public) VALUES ('memes', 'memes', true);
-CREATE POLICY "Public Access" ON storage.objects FOR SELECT USING (bucket_id = 'memes');
-CREATE POLICY "Authenticated Users Can Upload" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'memes' AND auth.role() = 'authenticated');
+-- Create ENUM types if they don't exist
+DO $$ BEGIN
+    CREATE TYPE battle_status AS ENUM ('upcoming', 'active', 'completed');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
--- Create ENUM types
-CREATE TYPE battle_status AS ENUM ('upcoming', 'active', 'completed');
-CREATE TYPE team_side AS ENUM ('left', 'right');
-CREATE TYPE notification_type AS ENUM ('battle_start', 'battle_end', 'vote_received', 'comment_received');
+DO $$ BEGIN
+    CREATE TYPE team_side AS ENUM ('left', 'right');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
--- Create tables
-CREATE TABLE users (
+DO $$ BEGIN
+    CREATE TYPE notification_type AS ENUM ('battle_start', 'battle_end', 'vote_received', 'comment_received');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+-- Create tables if they don't exist
+CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     wallet_address TEXT UNIQUE NOT NULL,
     username TEXT UNIQUE NOT NULL,
@@ -32,7 +41,7 @@ CREATE TABLE users (
     CONSTRAINT username_length CHECK (char_length(username) >= 3 AND char_length(username) <= 30)
 );
 
-CREATE TABLE battles (
+CREATE TABLE IF NOT EXISTS battles (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     title TEXT NOT NULL,
     description TEXT,
@@ -46,7 +55,7 @@ CREATE TABLE battles (
     CONSTRAINT title_length CHECK (char_length(title) >= 3 AND char_length(title) <= 100)
 );
 
-CREATE TABLE memes (
+CREATE TABLE IF NOT EXISTS memes (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     battle_id UUID REFERENCES battles(id) ON DELETE CASCADE,
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
@@ -57,7 +66,7 @@ CREATE TABLE memes (
     reported_count INTEGER DEFAULT 0
 );
 
-CREATE TABLE votes (
+CREATE TABLE IF NOT EXISTS votes (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     battle_id UUID REFERENCES battles(id) ON DELETE CASCADE,
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
@@ -66,7 +75,7 @@ CREATE TABLE votes (
     UNIQUE(battle_id, user_id)
 );
 
-CREATE TABLE comments (
+CREATE TABLE IF NOT EXISTS comments (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     battle_id UUID REFERENCES battles(id) ON DELETE CASCADE,
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
@@ -77,7 +86,7 @@ CREATE TABLE comments (
     CONSTRAINT content_length CHECK (char_length(content) >= 1 AND char_length(content) <= 1000)
 );
 
-CREATE TABLE notifications (
+CREATE TABLE IF NOT EXISTS notifications (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
     type notification_type NOT NULL,
@@ -86,7 +95,7 @@ CREATE TABLE notifications (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE TABLE user_achievements (
+CREATE TABLE IF NOT EXISTS user_achievements (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
     achievement_type TEXT NOT NULL,
@@ -94,7 +103,7 @@ CREATE TABLE user_achievements (
     UNIQUE(user_id, achievement_type)
 );
 
-CREATE TABLE wallet_activities (
+CREATE TABLE IF NOT EXISTS wallet_activities (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
     wallet_address TEXT NOT NULL,
@@ -103,18 +112,64 @@ CREATE TABLE wallet_activities (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Create indexes
-CREATE INDEX idx_battles_status ON battles(status);
-CREATE INDEX idx_battles_start_time ON battles(start_time);
-CREATE INDEX idx_memes_battle_id ON memes(battle_id);
-CREATE INDEX idx_votes_battle_id_user_id ON votes(battle_id, user_id);
-CREATE INDEX idx_users_username ON users(username);
-CREATE INDEX idx_comments_battle_id ON comments(battle_id);
-CREATE INDEX idx_notifications_user_id ON notifications(user_id, is_read);
-CREATE INDEX idx_users_wallet ON users(wallet_address);
-CREATE INDEX idx_wallet_activities_user ON wallet_activities(user_id, created_at);
+-- Create indexes if they don't exist
+DO $$ BEGIN
+    CREATE INDEX IF NOT EXISTS idx_battles_status ON battles(status);
+    CREATE INDEX IF NOT EXISTS idx_battles_start_time ON battles(start_time);
+    CREATE INDEX IF NOT EXISTS idx_memes_battle_id ON memes(battle_id);
+    CREATE INDEX IF NOT EXISTS idx_votes_battle_id_user_id ON votes(battle_id, user_id);
+    CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+    CREATE INDEX IF NOT EXISTS idx_comments_battle_id ON comments(battle_id);
+    CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id, is_read);
+    CREATE INDEX IF NOT EXISTS idx_users_wallet ON users(wallet_address);
+    CREATE INDEX IF NOT EXISTS idx_wallet_activities_user ON wallet_activities(user_id, created_at);
+END $$;
 
--- Create functions for battle status updates
+-- Enable row level security
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+
+-- Create policies if they don't exist
+DO $$ BEGIN
+    CREATE POLICY "Public users read" ON users FOR SELECT USING (true);
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+-- Update users RLS policy to allow updates
+ALTER TABLE users DISABLE ROW LEVEL SECURITY;
+
+-- Drop and recreate the update policy
+DO $$ BEGIN
+    DROP POLICY IF EXISTS "Users can update own profile" ON users;
+    CREATE POLICY "Users can update own profile" ON users 
+    FOR UPDATE USING (true);
+EXCEPTION
+    WHEN undefined_object THEN null;
+END $$;
+
+-- Enable RLS again
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+
+DO $$ BEGIN
+    CREATE POLICY "Allow anyone to create a user" ON users FOR INSERT WITH CHECK (true);
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+-- Drop existing triggers
+DROP TRIGGER IF EXISTS battle_status_update ON battles;
+DROP TRIGGER IF EXISTS vote_counts_update ON votes;
+DROP TRIGGER IF EXISTS battle_winner_determination ON battles;
+DROP TRIGGER IF EXISTS update_user_stats_on_vote ON votes;
+DROP TRIGGER IF EXISTS update_user_stats_on_meme ON memes;
+
+-- Drop existing functions
+DROP FUNCTION IF EXISTS update_battle_status() CASCADE;
+DROP FUNCTION IF EXISTS update_vote_counts() CASCADE;
+DROP FUNCTION IF EXISTS determine_battle_winner() CASCADE;
+DROP FUNCTION IF EXISTS update_user_stats() CASCADE;
+
+-- Recreate functions
 CREATE OR REPLACE FUNCTION update_battle_status()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -130,14 +185,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Create trigger for battle status updates
-CREATE TRIGGER battle_status_update
-    AFTER INSERT OR UPDATE OF start_time, end_time
-    ON battles
-    FOR EACH ROW
-    EXECUTE FUNCTION update_battle_status();
-
--- Create function to update vote counts
 CREATE OR REPLACE FUNCTION update_vote_counts()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -168,14 +215,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Create trigger for vote counts
-CREATE TRIGGER vote_counts_update
-    AFTER INSERT OR DELETE
-    ON votes
-    FOR EACH ROW
-    EXECUTE FUNCTION update_vote_counts();
-
--- Create function to determine battle winner
 CREATE OR REPLACE FUNCTION determine_battle_winner()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -195,20 +234,30 @@ BEGIN
         WHERE id = NEW.id;
 
         -- Update winner stats
-        UPDATE users
+        UPDATE users u
         SET total_wins = total_wins + 1
-        WHERE id IN (
-            SELECT user_id
-            FROM memes
-            WHERE battle_id = NEW.id
-            AND team = (SELECT winner_team FROM battles WHERE id = NEW.id)
-        );
+        FROM memes m
+        WHERE m.battle_id = NEW.id 
+        AND m.team = (SELECT winner_team FROM battles WHERE id = NEW.id)
+        AND m.user_id = u.id;
     END IF;
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
--- Create trigger for determining battle winner
+-- Recreate triggers
+CREATE TRIGGER battle_status_update
+    AFTER INSERT OR UPDATE OF start_time, end_time
+    ON battles
+    FOR EACH ROW
+    EXECUTE FUNCTION update_battle_status();
+
+CREATE TRIGGER vote_counts_update
+    AFTER INSERT OR DELETE
+    ON votes
+    FOR EACH ROW
+    EXECUTE FUNCTION update_vote_counts();
+
 CREATE TRIGGER battle_winner_determination
     AFTER UPDATE OF status
     ON battles
@@ -243,6 +292,23 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Create function to update username
+CREATE OR REPLACE FUNCTION update_username(p_wallet_address TEXT, p_new_username TEXT)
+RETURNS json AS $$
+DECLARE
+    v_updated_user json;
+BEGIN
+    UPDATE users 
+    SET 
+        username = p_new_username,
+        updated_at = NOW()
+    WHERE wallet_address = p_wallet_address
+    RETURNING row_to_json(users.*) INTO v_updated_user;
+    
+    RETURN v_updated_user;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
 -- Set up Row Level Security (RLS)
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE battles ENABLE ROW LEVEL SECURITY;
@@ -250,43 +316,7 @@ ALTER TABLE memes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE votes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE comments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
-ALTER TABLE user_achievements ENABLE ROW LEVEL SECURITY;
 ALTER TABLE wallet_activities ENABLE ROW LEVEL SECURITY;
-
--- Create policies
-CREATE POLICY "Public users read" ON users FOR SELECT USING (true);
-CREATE POLICY "Users can update own profile" ON users FOR UPDATE USING (auth.uid() = id);
-
-CREATE POLICY "Public battles read" ON battles FOR SELECT USING (true);
-CREATE POLICY "Admins can manage battles" ON battles FOR ALL USING (auth.role() = 'authenticated');
-
-CREATE POLICY "Public memes read" ON memes FOR SELECT USING (true);
-CREATE POLICY "Users can submit memes" ON memes FOR INSERT WITH CHECK (auth.uid() = user_id);
-CREATE POLICY "Users can update own memes" ON memes FOR UPDATE USING (auth.uid() = user_id);
-
-CREATE POLICY "Public votes read" ON votes FOR SELECT USING (true);
-CREATE POLICY "Users can vote" ON votes FOR INSERT WITH CHECK (auth.uid() = user_id);
-CREATE POLICY "Users can change votes" ON votes FOR DELETE USING (auth.uid() = user_id);
-
-CREATE POLICY "Public comments read" ON comments FOR SELECT USING (true);
-CREATE POLICY "Users can comment" ON comments FOR INSERT WITH CHECK (auth.uid() = user_id);
-CREATE POLICY "Users can update own comments" ON comments FOR UPDATE USING (auth.uid() = user_id);
-CREATE POLICY "Users can delete own comments" ON comments FOR DELETE USING (auth.uid() = user_id);
-
-CREATE POLICY "Users see own notifications" ON notifications FOR SELECT USING (auth.uid() = user_id);
-CREATE POLICY "System can create notifications" ON notifications FOR INSERT WITH CHECK (auth.role() = 'authenticated');
-CREATE POLICY "Users can mark notifications read" ON notifications FOR UPDATE USING (auth.uid() = user_id);
-
-CREATE POLICY "Users see own achievements" ON user_achievements FOR SELECT USING (auth.uid() = user_id);
-CREATE POLICY "System can grant achievements" ON user_achievements FOR INSERT WITH CHECK (auth.role() = 'authenticated');
-
-CREATE POLICY "Users can view own wallet activities" 
-    ON wallet_activities FOR SELECT 
-    USING (auth.uid() = user_id);
-
-CREATE POLICY "System can insert wallet activities" 
-    ON wallet_activities FOR INSERT 
-    WITH CHECK (auth.role() = 'authenticated');
 
 -- Create view for leaderboard
 CREATE OR REPLACE VIEW leaderboard AS
